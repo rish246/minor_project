@@ -12,6 +12,8 @@ build/
 develop-eggs/
 dist/
 
+# other packages
+pan18ap/
 # my packages
 requirements.txt
 ge
