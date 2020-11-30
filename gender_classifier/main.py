@@ -30,6 +30,7 @@ from sklearn.svm import SVC, LinearSVC
 # nltk libraries
 from nltk.tokenize.casual import TweetTokenizer
 from nltk.tokenize.treebank import TreebankWordDetokenizer
+from nltk.stem import WordNetLemmatizer
 
 # others
 import preprocessor as tp
@@ -45,7 +46,7 @@ config = {
 
 ############################################################################################
 ##################        LOAD DATASET      ##############################################
-def load_pan_data(xmls_directory, truth_path, txts_destination_directory):
+def load_data(xmls_directory, truth_path, txts_destination_directory):
     """ 
     Loads Pan data
 
@@ -141,32 +142,38 @@ def load_pan_data(xmls_directory, truth_path, txts_destination_directory):
 
 ############################################################################################
 ####################3 Preprocess each tweet ###############################################
-def preprocess_tweet(my_tweet):
+def preprocess_tweet(tweet):
     """
     This function will preprocess the input tweet
 
     Steps for preprocessing:
         1. Lowercase the letters
         2. Replace the characters with frequency greater than 3 with 3 in a word
+        3. Replace a url with Tag: <URLURL>
+        4. Replace a tag mention: <UsernameMention>
+
     
     @TODO:
         1. Look for better preprocessing methods on the web
         2. Apply here
     """
-    # steps 1 and 2 done
-    # 1. Clean the tweet
-        # remove #
-        # remove urls
-        # remove mentions
-    my_tweet = tp.clean(my_tweet)
+    clean_tweet = tp.clean(tweet)
     
-    # 2. Remove stopswords
-    my_tweet = remove_stopwords(my_tweet)
+    # perform lemmatization
+    tokenizer = TweetTokenizer()
+    tweet_tokens = tokenizer.tokenize(clean_tweet)
+    lemmatizer = WordNetLemmatizer()
     
-    # 3. Remove extra spaces, punctuations and lowercase the tweet
-    preprocessed_tweet = my_tweet.lower().replace('[^\w\s]',' ').replace('\s\s+', ' ')
+    for token_idx, token in enumerate(tweet_tokens):
+        tweet_tokens[token_idx] = lemmatizer.lemmatize(token, pos='a')
 
+    lemmatized_tweet = ' '.join(tweet_tokens)
+    
+    
+    # remove stopwords
+    preprocessed_tweet = remove_stopwords(lemmatized_tweet)
     return preprocessed_tweet
+
 
 ###########################################################################################################
 ############################# Extract features of the data provided #########################################
@@ -183,7 +190,8 @@ def extract_features(docs_train, docs_test, perform_dimensionality_reduction):
         1. Get more features and use them to get more accurate predictions 
    
     """
-    word_ngram_range = (1, 3)
+    word_ngram_range = (1, 4)
+    char_ngram_range = (2, 5)
 
     '''
     Build a char_vectorizer and combine word_vectorizer and char_vectorizer to make an n_grams vectorizer
@@ -195,21 +203,28 @@ def extract_features(docs_train, docs_test, perform_dimensionality_reduction):
                                     min_df=2,
                                     use_idf=True, 
                                     sublinear_tf=True)
-    print("Created a word vectorizer")
-
+    print(f'Created a word vectorizer')
     char_vectorizer = TfidfVectorizer(preprocessor=preprocess_tweet,
                                      analyzer='char', 
-                                     ngram_range=(3, 5),
+                                     ngram_range=char_ngram_range,
                                      min_df=2, 
                                      use_idf=True, 
                                      sublinear_tf=True)
-    print("Created a character vectorizer")
+    print(f'Created a char vectorizer')
+
+
+
+
+    ###############################################################################################
+    ################## Count vectorizer -> which just computes the count of tokens ################
+
 
     '''
     Merge the two vectorizers using a pipeline
     '''
-    ngrams_vectorizer = Pipeline([('feats', FeatureUnion([('word_ngram', word_vectorizer),
-                                                         ('char_ngram', char_vectorizer),
+    ngrams_vectorizer = Pipeline([('feats', FeatureUnion([
+                                                        ('word_ngram', word_vectorizer),
+                                                         ('char_ngram', char_vectorizer)
                                                          ])),
                                  # ('clff', LinearSVC(random_state=42))
                                  ])
@@ -222,7 +237,8 @@ def extract_features(docs_train, docs_test, perform_dimensionality_reduction):
     print("Performed fitting of data")
     ############ perform dimensionality reduction ################
     
-    if(perform_dimensionality_reduction == True):
+    if(perform_dimensionality_reduction == True):                                 
+
         print("Performing dimensionality reduction")
         # use TruncatedSVD to reduce dimensionality of our dataset
         svd = TruncatedSVD(n_components = 300, random_state = 42)
@@ -261,15 +277,23 @@ def train_and_test_model(clf, X_train, y_train, X_test, y_test):
 
 
     ###################### print the accuracy of our classifier ###########################
-    accuracy = metrics.accuracy_score(y_test, y_predicted)
+    accuracy = metrics.accuracy_score(y_test, y_predicted, normalize = True)
     print(f'Accuracy of our classifier is : {accuracy}')
+
+    ################# f-major score #########################
+    f_major = metrics.f1_score(y_test, y_predicted, average='micro')
+    print(f'F-Major of our classifier is : {f_major}')
+
+    ################# precesion ##############################
+    precision = metrics.precision_score(y_test, y_predicted, average='micro')
+    print(f'Precision of our classifier is {precision}')
 
 ############### Main function ######################
 def main():
     print("Starting the project...")
 
     ### 1 -> Read the data from the files
-    merged_tweets, truths, author_ids, original_tweet_lengths = load_pan_data(config['xmls_directory'], config['truth_path'], config['txts_destination_directory'])
+    merged_tweets, truths, author_ids, original_tweet_lengths = load_data(config['xmls_directory'], config['truth_path'], config['txts_destination_directory'])
     print("Loaded Pan data")
 
     ##### perform test train split
@@ -291,7 +315,7 @@ def main():
 
     ######################################################################
     # build a classifier
-    clf = LinearSVC(random_state = 42)
+    clf = LinearSVC(random_state = 42, tol=0.3)
     train_and_test_model(clf, X_train, y_train, X_test, y_test)
     print("Done training the dataset...")
     print("<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
